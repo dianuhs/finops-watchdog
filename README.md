@@ -17,6 +17,17 @@ FinOps Watchdog is an intelligent AWS cost anomaly detection system that automat
 
 Cost surprises are expensive. By the time you notice a spending spike in your monthly bill, the damage is done. FinOps Watchdog continuously monitors your AWS costs using proven statistical methods, alerting you to anomalies within hours instead of weeks. This project demonstrates my understanding of both the technical and business sides of cloud cost management.
 
+## What It Looks Like
+
+*Intelligent anomaly detection with severity classification* <br>
+<img src="docs/images/anomaly-detection.png" alt="Anomaly Detection Output" width="500">
+
+*Professional CLI interface with multiple commands* <br>
+<img src="docs/images/help-menu.png" alt="CLI Help Menu" width="500">
+
+*Cost trend analysis and volatility monitoring* <br>
+<img src="docs/images/trend-analysis.png" alt="Trend Analysis" width="300">
+
 ## Sample Output
 
 ```bash
@@ -305,5 +316,6 @@ MIT License - see [LICENSE](LICENSE) file for details.
 **Built for proactive FinOps**
 
 *FinOps Watchdog helps teams catch cost anomalies before they become budget surprises, enabling truly proactive cloud cost management.*
+
 
 
