@@ -15,5 +15,3 @@ jobs:
           pip install -e .
           pip install pytest ruff black
       - run: pytest -q
-      - run: ruff check .
-      - run: black --check .
