@@ -20,13 +20,13 @@ Cost surprises are expensive. By the time you notice a spending spike in your mo
 ## What It Looks Like
 
 *Intelligent anomaly detection with severity classification* <br>
-<img src="docs/images/anomaly-detection.png" alt="Anomaly Detection Output" width="500">
+<img src="docs/images/anomaly-detection.png" alt="Anomaly Detection Output" width="600">
 
 *Professional CLI interface with multiple commands* <br>
-<img src="docs/images/help-menu.png" alt="CLI Help Menu" width="500">
+<img src="docs/images/help-menu.png" alt="CLI Help Menu" width="600">
 
 *Cost trend analysis and volatility monitoring* <br>
-<img src="docs/images/trend-analysis.png" alt="Trend Analysis" width="300">
+<img src="docs/images/trend-analysis.png" alt="Trend Analysis" width="400">
 
 ## Sample Output
 
@@ -316,6 +316,7 @@ MIT License - see [LICENSE](LICENSE) file for details.
 **Built for proactive FinOps**
 
 *FinOps Watchdog helps teams catch cost anomalies before they become budget surprises, enabling truly proactive cloud cost management.*
+
 
 
 
