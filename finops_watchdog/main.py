@@ -4,14 +4,13 @@ FinOps Watchdog - AWS Cost Anomaly Detection and Alerting CLI
 """
 import click
 import logging
-from typing import Optional
+from datetime import datetime  # Add this line
 from finops_watchdog.data_collector import CostDataCollector
 from finops_watchdog.detector import CostAnomalyDetector
 from finops_watchdog.alerter import AlertManager
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
-from rich import print as rprint
 import json
 import yaml
 
