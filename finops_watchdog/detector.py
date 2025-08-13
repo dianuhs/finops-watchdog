@@ -3,8 +3,8 @@ Cost anomaly detection engine using statistical methods.
 """
 import pandas as pd
 import numpy as np
-from typing import List, Dict, Optional, Tuple
-from datetime import datetime, timedelta
+from typing import List, Dict, Optional
+from datetime import datetime
 from dataclasses import dataclass
 from enum import Enum
 import logging
