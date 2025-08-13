@@ -213,8 +213,9 @@ finops-watchdog detect --alert-types console,slack --slack-webhook YOUR_URL
             "Effect": "Allow",
             "Action": [
                 "ce:GetCostAndUsage",
-                "ce:GetReservationCoverage",
-                "ce:GetUsageReport"
+                "ce:GetCostAndUsageWithResources",
+                "ce:GetDimensionValues",
+                "ce:GetTags"
             ],
             "Resource": "*"
         }
@@ -304,4 +305,5 @@ MIT License - see [LICENSE](LICENSE) file for details.
 **Built for proactive FinOps**
 
 *FinOps Watchdog helps teams catch cost anomalies before they become budget surprises, enabling truly proactive cloud cost management.*
+
 
