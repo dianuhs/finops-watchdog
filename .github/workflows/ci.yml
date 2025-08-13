@@ -14,4 +14,4 @@ jobs:
       - run: |
           pip install -e .
           pip install pytest ruff black
-      - run: pytest -q
+      - run: pytest -q tests/
