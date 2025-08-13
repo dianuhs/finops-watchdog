@@ -4,7 +4,7 @@ AWS Cost Explorer data collection for anomaly detection.
 import boto3
 import pandas as pd
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 from botocore.exceptions import ClientError
 import logging
 
