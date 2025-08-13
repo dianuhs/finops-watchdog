@@ -9,7 +9,6 @@ from finops_watchdog.detector import Anomaly, SeverityLevel
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
-from rich import print as rprint
 import logging
 
 logger = logging.getLogger(__name__)
