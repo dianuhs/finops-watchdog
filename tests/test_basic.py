@@ -1,10 +1,7 @@
 """
 Basic tests that work in CI without AWS credentials.
 """
-import pytest
 from finops_watchdog.detector import CostAnomalyDetector, SeverityLevel
-import pandas as pd
-from datetime import datetime, timedelta
 
 def test_anomaly_detector_initialization():
     """Test that the detector can be created."""
