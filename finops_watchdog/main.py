@@ -4,7 +4,7 @@ FinOps Watchdog - AWS Cost Anomaly Detection and Alerting CLI
 """
 import click
 import logging
-from datetime import datetime  # Add this line
+from datetime import datetime
 from finops_watchdog.data_collector import CostDataCollector
 from finops_watchdog.detector import CostAnomalyDetector
 from finops_watchdog.alerter import AlertManager
@@ -46,12 +46,42 @@ def cli(ctx, profile, verbose):
 @click.option('--alert-types', default='console', help='Alert types (console,slack)')
 @click.option('--slack-webhook', default=None, help='Slack webhook URL for notifications')
 @click.option('--export', default=None, help='Export results to file (JSON/YAML)')
+@click.option('--demo', is_flag=True, help='Run with sample data (no AWS setup needed)')
 @click.pass_context
-def detect(ctx, days, sensitivity, alert_types, slack_webhook, export):
+def detect(ctx, days, sensitivity, alert_types, slack_webhook, export, demo):
     """Detect cost anomalies in your AWS spending."""
     
     console.print("🔍 FinOps Watchdog - Anomaly Detection", style="bold blue")
     console.print(f"📊 Analyzing last {days} days with {sensitivity} sensitivity...\n")
+    
+    if demo:
+        console.print("🎭 Demo Mode - Using sample data", style="bold yellow")
+        import pandas as pd
+        import os
+        
+        # Load sample data
+        sample_file = os.path.join(os.path.dirname(__file__), '..', 'examples', 'sample_cost_data.csv')
+        if not os.path.exists(sample_file):
+            console.print("❌ Sample data file not found", style="red")
+            exit(1)
+            
+        daily_costs = pd.read_csv(sample_file)
+        daily_costs['date'] = pd.to_datetime(daily_costs['date']).dt.date
+        
+        # Run detection on sample data
+        detector = CostAnomalyDetector(sensitivity=sensitivity)
+        anomalies = detector.detect_daily_anomalies(daily_costs)
+        trends = detector.analyze_trends(daily_costs)
+        
+        _display_detection_summary(anomalies, trends, len(daily_costs))
+        
+        if anomalies:
+            alerter = AlertManager(slack_webhook=slack_webhook)
+            alert_type_list = [t.strip() for t in alert_types.split(',')]
+            alerter.send_anomaly_alerts(anomalies, alert_type_list)
+        
+        console.print("\n🎭 Demo completed! Try with real AWS data by removing --demo flag", style="bold blue")
+        exit(0)
     
     try:
         # Initialize components
