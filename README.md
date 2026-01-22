@@ -59,17 +59,6 @@ If it can’t be explained, it isn’t flagged.
 
 ---
 
-## What Watchdog Does Not Do
-
-- No dashboards
-- No vendor workflows
-- No “AI-powered” claims
-- No opaque anomaly scores
-
-This tool is built for practitioners who want to understand *why* spend changed — not just that it did.
-
----
-
 ## Why Not Just Use AWS Budgets or Cost Anomaly Detection?
 
 AWS tools are optimized for AWS’s perspective:
@@ -223,3 +212,4 @@ FinOps Watchdog exists because cost visibility without change awareness is incom
 
 It does not replace AWS tools.  
 It sits above them — closer to how FinOps decisions are actually made.
+
