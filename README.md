@@ -1,331 +1,225 @@
 # FinOps Watchdog
 
-**Intelligent AWS cost anomaly detection and alerting** - Catch unusual spending patterns before they become expensive surprises.
+**Baseline-aware cost change detection built on FinOps Lite**
 
 [![Tests](https://github.com/dianuhs/finops-watchdog/actions/workflows/ci.yml/badge.svg)](https://github.com/dianuhs/finops-watchdog/actions/workflows/ci.yml)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
-> Proactive cost monitoring that alerts you to anomalies before they impact your budget.
+> Detect meaningful cloud cost changes relative to known baselines — not opaque models.
+
+---
 
 ## Overview
 
-FinOps Watchdog is an intelligent AWS cost anomaly detection system that automatically identifies unusual spending patterns using statistical analysis. Built for FinOps teams who need proactive cost monitoring, it detects cost spikes, drops, and service-level anomalies before they become budget problems.
+FinOps Watchdog is a cost change detection tool designed to sit **on top of FinOps Lite**.
 
-## Why FinOps Watchdog?
+It does not pull raw billing data.  
+It does not rely on black-box anomaly models.  
+It does not generate dashboards.
 
-Cloud cost management is often complex and overwhelming, especially for small teams or organizations new to FinOps. FinOps Watchdog was born out of a desire to simplify AWS cost visibility and optimization, empowering teams to make data-driven decisions without enterprise-grade complexity. This project reflects my passion for bridging technical and financial domains to drive cloud efficiency.
+Instead, Watchdog consumes **deterministic, explainable cost outputs** from FinOps Lite and answers a narrower, more practical question:
 
-### Business Impact
+> Given what we already know about our costs, what changed — and which changes deserve attention?
 
-- **Cost Savings**: Detects anomalies early, preventing budget overruns by up to 30% (based on typical AWS cost spikes that go unnoticed for weeks)
-- **Team Efficiency**: Automates daily cost monitoring, saving FinOps teams 2-3 hours of manual analysis per week
-- **Proactive Governance**: Enables real-time alerts, reducing time-to-resolution for cost issues from weeks to hours
-- **Risk Mitigation**: Catches runaway costs before they impact quarterly budgets, protecting against surprise cloud bills
-- **Operational Excellence**: Provides actionable recommendations, enabling teams to optimize spending patterns proactively
+This makes Watchdog suitable for FinOps reviews, automation, and post-incident analysis where explainability matters.
+
+---
+
+## How It Fits
+
+FinOps Watchdog is the second layer in a deliberate stack:
+
+- **FinOps Lite** → cost truth and reasoning  
+- **FinOps Watchdog** → change detection and guardrails  
+- **Recovery Economics (future)** → cost-to-value decisions  
+
+The separation is intentional.
+
+FinOps Lite establishes *what is true*.  
+Watchdog highlights *what is different*.
+
+---
+
+## What Watchdog Does
+
+- Compares current spend to explicit historical baselines
+- Detects deviations relative to what is already considered normal
+- Attributes changes to services, regions, or accounts
+- Distinguishes one-time spikes from sustained drift
+- Produces findings that are inspectable, auditable, and reproducible
+
+Every finding can be traced back to:
+- a known cost window
+- a known breakdown
+- a known baseline
+
+If it can’t be explained, it isn’t flagged.
+
+---
+
+## What Watchdog Does Not Do
+
+- No dashboards
+- No vendor workflows
+- No “AI-powered” claims
+- No opaque anomaly scores
+
+This tool is built for practitioners who want to understand *why* spend changed — not just that it did.
+
+---
+
+## Why Not Just Use AWS Budgets or Cost Anomaly Detection?
+
+AWS tools are optimized for AWS’s perspective:
+
+- **Budgets** rely on static thresholds  
+- **Anomaly Detection** uses opaque statistical models  
+- Attribution is limited  
+- Post-hoc auditability is weak  
+
+They are useful guardrails, but they do not explain change.
+
+Watchdog is optimized for FinOps workflows:
+
+- baselines you can inspect
+- windows you define explicitly
+- deltas you can reason about
+- findings you can defend in a review or post-mortem
+
+AWS may tell you *that* something is anomalous.  
+Watchdog tells you *what changed, where, and relative to what*.
+
+---
+
+## Input Contract (Required)
+
+FinOps Watchdog **does not** query AWS Cost Explorer directly.
+
+It consumes outputs produced by FinOps Lite, such as:
+
+- cost overviews (time-window totals)
+- service-level breakdowns
+- FOCUS-aligned (FOCUS-lite) CSV exports
+
+This makes Watchdog deterministic, testable, and automation-ready.
+
+### Example Layout
+
+```text
+finops-lite/
+  outputs/
+    2026-01-20/
+      overview.csv
+      services.csv
+      focus-lite.csv
+
+finops-watchdog/
+  inputs/
+    latest -> ../finops-lite/outputs/2026-01-20/
+```
+
+---
+
+## Example Finding
+
+```text
+EC2 spend increased +$47.82 (+37%) versus the prior 14-day baseline.
+82% of the increase is concentrated in us-east-1.
+Change began 2 days ago and persists.
+```
+
+This is the unit of output Watchdog optimizes for.
+
+---
 
 ## What It Looks Like
 
-*Intelligent anomaly detection with severity classification* <br>
-<img src="docs/images/anomaly-detection.png" alt="Anomaly Detection Output" width="600">
+*Explainable change detection with clear attribution*  
+<img src="docs/images/anomaly-detection.png" alt="Watchdog Findings Output" width="600">
 
-*Professional CLI interface with multiple commands* <br>
+*CLI-first workflow designed for automation*  
 <img src="docs/images/help-menu.png" alt="CLI Help Menu" width="600">
 
-*Cost trend analysis and volatility monitoring* <br>
+*Trend context to distinguish spikes from drift*  
 <img src="docs/images/trend-analysis.png" alt="Trend Analysis" width="400">
 
-## Sample Output
+---
+
+## Usage
 
 ```bash
-$ finops-watchdog detect --days 30 --sensitivity medium
-🔍 FinOps Watchdog - Anomaly Detection
-📊 Analyzing last 30 days with medium sensitivity...
+# Run FinOps Lite first
+finops cost overview --days 30
+finops cost services --days 30
 
-✅ Retrieved 30 days of cost data
-🚨 Found 3 anomalies in 30 days
-🔥 1 Critical | ⚠️ 1 High | ⚡ 1 Medium
-
-╭─────────────────────────── Anomaly Details ───────────────────────────────────────╮
-│ Date       │ Type        │ Severity │ Service    │ Impact          │ Description  │
-├────────────┼─────────────┼──────────┼────────────┼─────────────────┼──────────────┤
-│ 2024-12-08 │ Cost Spike  │ CRITICAL │ Amazon EC2 │ $245.67 (+193%) │ Unusual...   │
-│ 2024-12-06 │ Cost Spike  │ HIGH     │ AWS Lambda │ $89.23 (+156%)  │ Function...  │
-│ 2024-12-03 │ Cost Drop   │ MEDIUM   │ Amazon RDS │ $12.45 (-67%)   │ Service...   │
-╰───────────────────────────────────────────────────────────────────────────────────╯
-
-💡 Recommendations:
-• Investigate recent infrastructure changes or increased usage
-• Check for unintended EC2 instance launches or size changes
-• Review Lambda function execution patterns and memory settings
+# Analyze changes using Watchdog
+finops-watchdog analyze --input ./finops-lite/outputs/latest
 ```
 
-## Try It in 30 Seconds
+Watchdog exits with non-zero codes when actionable changes are detected, making it suitable for CI, cron jobs, and automated checks.
 
-```bash
-# Install and run
-git clone https://github.com/dianuhs/finops-watchdog.git
-cd finops-watchdog
-pip install -e .
-finops-watchdog detect --days 30
-```
+---
 
-## Key Features
+## Design Principles
 
-### 🔍 **Intelligent Anomaly Detection**
-- **Statistical analysis** using z-scores and rolling averages
-- **Multi-level detection** for both total costs and service-specific spending
-- **Configurable sensitivity** (low/medium/high) for different environments
-- **Confidence scoring** to reduce false positives
+- Explainability over cleverness  
+- Baselines over heuristics  
+- Practitioner control over vendor abstraction  
+- Reasoning before reaction  
 
-### 🚨 **Smart Alerting System**
-- **Severity classification** (Low/Medium/High/Critical) based on impact
-- **Rich console alerts** with actionable recommendations
-- **Slack webhook integration** for team notifications
-- **Email alerts** (coming soon)
+---
 
-### 📊 **Comprehensive Analysis**
-- **Trend detection** (increasing/decreasing costs)
-- **Volatility monitoring** to identify unstable spending patterns
-- **Service-level breakdown** to pinpoint cost drivers
-- **Historical pattern analysis** for accurate baselines
+## Versioning
 
-### 🔧 **Professional Tools**
-- **Multiple output formats** (console, JSON, YAML)
-- **Export capabilities** for further analysis
-- **CLI interface** with rich formatting
-- **AWS profile support** for multi-account setups
+**Current version: v0.2**
 
-## Real-World Use Cases
+This release formalizes Watchdog as a second-layer tool that depends on FinOps Lite outputs.
 
-**DevOps Team Cost Monitoring**
-A DevOps team uses `finops-watchdog detect --sensitivity high` in their CI/CD pipeline to catch cost spikes from infrastructure changes before deployment to production.
+Future versions will deepen attribution and baseline strategies — not add dashboards or black-box models.
 
-**FinOps Daily Standup**
-A FinOps analyst runs `finops-watchdog report --days 7` every morning to identify overnight cost anomalies and brief leadership on spending patterns.
-
-**Automated Budget Alerts**
-An enterprise sets up `finops-watchdog detect --alert-types slack` as a daily cron job, sending automatic Slack alerts to #finops-alerts when spending exceeds normal patterns.
-
-**Incident Response**
-When services go down, teams use `finops-watchdog trends --days 14` to verify that cost drops correlate with service outages, confirming impact scope.
-
-## Installation & Setup
-
-### Install from Source
-```bash
-git clone https://github.com/dianuhs/finops-watchdog.git
-cd finops-watchdog
-pip install -e .
-```
-
-### AWS Setup
-```bash
-# Create AWS profile (recommended)
-aws configure --profile finops-watchdog
-
-# Enable Cost Explorer in AWS Console
-# Go to: AWS Cost Management → Cost Explorer → Enable
-
-# Test installation
-finops-watchdog --help
-```
-
-## Quick Start
-
-```bash
-# Basic anomaly detection
-finops-watchdog detect --days 30
-
-# High sensitivity detection
-finops-watchdog detect --sensitivity high --days 14
-
-# Generate daily report
-finops-watchdog report --days 7
-
-# Analyze cost trends
-finops-watchdog trends --days 30
-
-# Export results for further analysis
-finops-watchdog detect --export results.json
-```
-
-## Advanced Usage
-
-### Anomaly Detection
-```bash
-# Different sensitivity levels
-finops-watchdog detect --sensitivity low     # Fewer false positives
-finops-watchdog detect --sensitivity medium  # Balanced detection
-finops-watchdog detect --sensitivity high    # Catch smaller anomalies
-
-# Custom time periods
-finops-watchdog detect --days 14   # Recent changes
-finops-watchdog detect --days 60   # Longer baseline
-
-# With Slack alerts
-finops-watchdog detect --alert-types slack --slack-webhook YOUR_WEBHOOK_URL
-```
-
-### Reporting & Analysis
-```bash
-# Daily cost report
-finops-watchdog report --days 7
-
-# Weekly trend analysis
-finops-watchdog trends --days 30
-
-# Export for automation
-finops-watchdog detect --export anomalies.json --days 30
-finops-watchdog trends --days 30 > trends.txt
-```
-
-### Slack Integration
-```bash
-# Test Slack webhook
-finops-watchdog test-slack --webhook-url YOUR_WEBHOOK_URL
-
-# Automated alerts
-finops-watchdog detect --alert-types console,slack --slack-webhook YOUR_URL
-```
-
-## How It Works
-
-### Statistical Detection Methods
-
-**Z-Score Analysis**
-- Calculates rolling mean and standard deviation
-- Identifies costs beyond 2+ standard deviations
-- Adapts to seasonal patterns and growth trends
-
-**Threshold-Based Detection**
-- Percentage deviation from expected costs
-- Configurable sensitivity levels
-- Minimum impact thresholds to reduce noise
-
-**Service-Level Monitoring**
-- Analyzes each AWS service independently
-- Detects service-specific anomalies
-- Correlates service spikes with total cost impact
-
-### Alert Severity Levels
-
-- **🔥 Critical**: >100% deviation or >3 standard deviations
-- **⚠️ High**: 75-100% deviation or >2.5 standard deviations  
-- **⚡ Medium**: 50-75% deviation or >2.0 standard deviations
-- **📊 Low**: 20-50% deviation or >1.5 standard deviations
-
-## Prerequisites
-
-- **Python 3.9+**
-- **AWS CLI configured** with appropriate credentials
-- **AWS Cost Explorer enabled** (may take 24-48 hours for first-time setup)
-
-### Required IAM Permissions
-
-```json
-{
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Effect": "Allow",
-            "Action": [
-                "ce:GetCostAndUsage",
-                "ce:GetCostAndUsageWithResources",
-                "ce:GetDimensionValues",
-                "ce:GetTags"
-            ],
-            "Resource": "*"
-        }
-    ]
-}
-```
-
-## Cost & Performance
-
-> **AWS Cost Explorer API**: ~$0.01 per API call. FinOps Watchdog optimizes queries to minimize costs while maximizing detection accuracy.
-> 
-> **Recommended Usage**: Daily runs for proactive monitoring, with higher frequency during infrastructure changes.
-
-## Configuration
-
-### Sensitivity Levels
-- **Low**: Fewer false positives, catches major anomalies only
-- **Medium**: Balanced detection for most environments  
-- **High**: Sensitive detection, may require tuning for noisy environments
-
-### Detection Windows
-- **14 days**: Good for recent changes and rapid response
-- **30 days**: Standard baseline for most workloads
-- **60+ days**: Seasonal patterns and long-term trends
-
-## Exit Codes
-
-FinOps Watchdog uses standard exit codes for automation:
-- `0`: No anomalies detected (success)
-- `1`: Anomalies detected (warning)
-- `2`: Critical anomalies detected (urgent action needed)
-- `3`: Error during execution
+---
 
 ## Roadmap
 
-**Now:**
-- ✅ Statistical anomaly detection
-- ✅ Multi-sensitivity analysis
-- ✅ Slack webhook integration
-- ✅ Rich console output
+**Now**
+- Baseline-aware change detection
+- Service-level attribution
+- CLI-first automation support
 
-**Next:**
-- [ ] Email alert integration
-- [ ] Historical anomaly tracking
-- [ ] Machine learning enhancements
-- [ ] Budget threshold integration
+**Next**
+- Weekday-aware and persistence-based baselines
+- Optional notification hooks (Slack, email)
+- Shared schema contracts with FinOps Lite
 
-**Later:**
-- [ ] Multi-account support
-- [ ] Custom detection rules
-- [ ] Integration with AWS Budgets
-- [ ] Anomaly correlation analysis
+**Later**
+- Recovery Economics workflows (cost → value)
+- Change classification tied to deployments or incidents
+
+---
 
 ## Development
 
 ```bash
-# Clone repository
 git clone https://github.com/dianuhs/finops-watchdog.git
 cd finops-watchdog
-
-# Install development dependencies
 pip install -e .[dev]
 
-# Run tests
 pytest
-
-# Check code quality
 black finops_watchdog/
 flake8 finops_watchdog/
 ```
 
-## Contributing
-
-Contributions welcome! Please read our [contributing guidelines](CONTRIBUTING.md) and submit PRs.
+---
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) file for details.
-
-## Support
-
-- **Bug reports**: [GitHub Issues](https://github.com/dianuhs/finops-watchdog/issues)
-- **Feature requests**: [GitHub Discussions](https://github.com/dianuhs/finops-watchdog/discussions)
+MIT License — see [LICENSE](LICENSE)
 
 ---
 
-**Built for proactive FinOps**
+FinOps Watchdog exists because cost visibility without change awareness is incomplete.
 
-*FinOps Watchdog helps teams catch cost anomalies before they become budget surprises, enabling truly proactive cloud cost management.*
-
-
-
-
-
+It does not replace AWS tools.  
+It sits above them — closer to how FinOps decisions are actually made.
