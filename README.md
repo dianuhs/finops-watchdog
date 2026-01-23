@@ -7,105 +7,74 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
-> Detect meaningful cloud cost changes relative to known baselines — not opaque models.
+> Detect meaningful cloud cost changes relative to known baselines.
 
 ---
 
 ## Overview
 
-FinOps Watchdog is a cost change detection tool designed to sit **on top of FinOps Lite**.
+FinOps Watchdog is a second-layer FinOps tool designed to sit directly on top of FinOps Lite.
 
-It does not pull raw billing data.  
-It does not rely on black-box anomaly models.  
-It does not generate dashboards.
+It assumes cost truth already exists.
 
-Instead, Watchdog consumes **deterministic, explainable cost outputs** from FinOps Lite and answers a narrower, more practical question:
+Watchdog does not query AWS billing APIs or generate dashboards. Instead, it consumes deterministic cost outputs from FinOps Lite and answers a more practical question:
 
-> Given what we already know about our costs, what changed — and which changes deserve attention?
+Given our recent cost history, what changed — and which changes actually deserve attention?
 
-This makes Watchdog suitable for FinOps reviews, automation, and post-incident analysis where explainability matters.
+This makes Watchdog useful in FinOps reviews, automation pipelines, and post-incident analysis, where explainability matters more than alert volume.
 
 ---
 
 ## How It Fits
 
-FinOps Watchdog is the second layer in a deliberate stack:
+Watchdog is part of a deliberately separated stack:
 
-- **FinOps Lite** → cost truth and reasoning  
-- **FinOps Watchdog** → change detection and guardrails  
-- **Recovery Economics (future)** → cost-to-value decisions  
+- FinOps Lite → cost truth and structure  
+- FinOps Watchdog → change detection and guardrails  
+- Recovery Economics (future) → cost-to-value decisions  
 
-The separation is intentional.
+Each layer has a single responsibility.
 
-FinOps Lite establishes *what is true*.  
-Watchdog highlights *what is different*.
+FinOps Lite establishes what is true.  
+Watchdog highlights what is different.
 
 ---
 
 ## What Watchdog Does
 
-- Compares current spend to explicit historical baselines
-- Detects deviations relative to what is already considered normal
-- Attributes changes to services, regions, or accounts
-- Distinguishes one-time spikes from sustained drift
-- Produces findings that are inspectable, auditable, and reproducible
+Watchdog focuses on change, not raw spend.
 
-Every finding can be traced back to:
-- a known cost window
-- a known breakdown
-- a known baseline
+It:
+- Compares current spend to explicit historical baselines  
+- Detects deviations relative to what is already considered normal  
+- Attributes changes at the service level  
+- Distinguishes short-lived spikes from sustained drift  
+- Produces findings that are inspectable, auditable, and reproducible  
 
-If it can’t be explained, it isn’t flagged.
+Every finding is grounded in a defined time window, a known baseline, and a visible cost breakdown.
 
 ---
 
-## What Watchdog Does Not Do
+## Change Classification
 
-- No dashboards
-- No vendor workflows
-- No “AI-powered” claims
-- No opaque anomaly scores
+Rather than generic anomalies, Watchdog classifies how spend is changing:
 
-This tool is built for practitioners who want to understand *why* spend changed — not just that it did.
+- SPIKE – abrupt, short-lived deviation from baseline  
+- DRIFT – gradual, sustained movement over time  
+- NEW – material spend with little or no prior baseline  
+- DROP – spend collapsing or disappearing relative to history  
 
----
-
-## Why Not Just Use AWS Budgets or Cost Anomaly Detection?
-
-AWS tools are optimized for AWS’s perspective:
-
-- **Budgets** rely on static thresholds  
-- **Anomaly Detection** uses opaque statistical models  
-- Attribution is limited  
-- Post-hoc auditability is weak  
-
-They are useful guardrails, but they do not explain change.
-
-Watchdog is optimized for FinOps workflows:
-
-- baselines you can inspect
-- windows you define explicitly
-- deltas you can reason about
-- findings you can defend in a review or post-mortem
-
-AWS may tell you *that* something is anomalous.  
-Watchdog tells you *what changed, where, and relative to what*.
+Each finding includes baseline vs current cost, absolute and percentage deltas, severity, confidence, and a plain-language explanation suitable for reviews or tickets.
 
 ---
 
-## Input Contract (Required)
+## Input Contract
 
-FinOps Watchdog **does not** query AWS Cost Explorer directly.
+FinOps Watchdog does not pull data directly from AWS.
 
-It consumes outputs produced by FinOps Lite, such as:
+It consumes CSV outputs produced by FinOps Lite, such as time-window cost overviews, service-level breakdowns, and optional FOCUS-lite exports.
 
-- cost overviews (time-window totals)
-- service-level breakdowns
-- FOCUS-aligned (FOCUS-lite) CSV exports
-
-This makes Watchdog deterministic, testable, and automation-ready.
-
-### Example Layout
+### Expected Layout
 
 ```text
 finops-lite/
@@ -122,80 +91,52 @@ finops-watchdog/
 
 ---
 
-## Example Finding
+## Example Output
 
 ```text
-EC2 spend increased +$47.82 (+37%) versus the prior 14-day baseline.
-82% of the increase is concentrated in us-east-1.
-Change began 2 days ago and persists.
+[HIGH] [SPIKE] AmazonEC2: +$47.82 (+37%) vs baseline
+Reason: Cost changed abruptly relative to recent behavior, suggesting a short-lived spike.
 ```
-
-This is the unit of output Watchdog optimizes for.
 
 ---
 
-## What It Looks Like
+## Screenshots
 
-*Explainable change detection with clear attribution*  
-<img src="docs/images/anomaly-detection.png" alt="Watchdog Findings Output" width="600">
+Add or replace screenshots below using your own environment.
 
-*CLI-first workflow designed for automation*  
-<img src="docs/images/help-menu.png" alt="CLI Help Menu" width="600">
+<img src="docs/images/anomaly-detection.png" alt="Service-level findings" width="600">
 
-*Trend context to distinguish spikes from drift*  
-<img src="docs/images/trend-analysis.png" alt="Trend Analysis" width="400">
+<img src="docs/images/help-menu.png" alt="CLI usage" width="600">
+
+<img src="docs/images/trend-analysis.png" alt="Baseline context" width="400">
 
 ---
 
 ## Usage
 
 ```bash
-# Run FinOps Lite first
 finops cost overview --days 30
 finops cost services --days 30
 
-# Analyze changes using Watchdog
 finops-watchdog analyze --input ./finops-lite/outputs/latest
 ```
-
-Watchdog exits with non-zero codes when actionable changes are detected, making it suitable for CI, cron jobs, and automated checks.
 
 ---
 
 ## Design Principles
 
 - Explainability over cleverness  
-- Baselines over heuristics  
-- Practitioner control over vendor abstraction  
+- Baselines over black-box models  
+- Determinism over surprise  
 - Reasoning before reaction  
 
 ---
 
 ## Versioning
 
-**Current version: v0.2**
+Current version: v0.3
 
-This release formalizes Watchdog as a second-layer tool that depends on FinOps Lite outputs.
-
-Future versions will deepen attribution and baseline strategies — not add dashboards or black-box models.
-
----
-
-## Roadmap
-
-**Now**
-- Baseline-aware change detection
-- Service-level attribution
-- CLI-first automation support
-
-**Next**
-- Weekday-aware and persistence-based baselines
-- Optional notification hooks (Slack, email)
-- Shared schema contracts with FinOps Lite
-
-**Later**
-- Recovery Economics workflows (cost → value)
-- Change classification tied to deployments or incidents
+This release establishes Watchdog as a baseline-aware interpretation layer built explicitly on FinOps Lite outputs.
 
 ---
 
@@ -215,11 +156,8 @@ flake8 finops_watchdog/
 
 ## License
 
-MIT License — see [LICENSE](LICENSE)
+MIT License — see LICENSE
 
 ---
 
 FinOps Watchdog exists because cost visibility without change awareness is incomplete.
-
-It does not replace AWS tools.  
-It sits above them — closer to how FinOps decisions are actually made.
