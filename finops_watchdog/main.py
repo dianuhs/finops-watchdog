@@ -1,335 +1,204 @@
-#!/usr/bin/env python3
-"""
-FinOps Watchdog - AWS Cost Anomaly Detection and Alerting CLI
-"""
 import click
-import logging
-from datetime import datetime
-from finops_watchdog.data_collector import CostDataCollector
-from finops_watchdog.detector import CostAnomalyDetector
-from finops_watchdog.alerter import AlertManager
-from rich.console import Console
-from rich.table import Table
-from rich.panel import Panel
-import json
-import yaml
+import pandas as pd
 
-console = Console()
+from .ingest import load_lite_outputs
+from .baselines.window import build_service_baseline
 
-# Set up logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
 
 @click.group()
-@click.option('--profile', default=None, help='AWS profile to use')
-@click.option('--verbose', '-v', is_flag=True, help='Enable verbose logging')
-@click.pass_context
-def cli(ctx, profile, verbose):
-    """FinOps Watchdog - AWS Cost Anomaly Detection and Alerting
-    
-    Automatically detect unusual spending patterns in your AWS costs
-    and get alerted before small problems become expensive surprises.
+def cli():
+    """FinOps Watchdog – baseline-aware cost change detection built on FinOps Lite."""
+    pass
+
+
+@cli.command()
+@click.option(
+    "--input",
+    "input_path",
+    type=click.Path(exists=True, file_okay=False),
+    required=True,
+    help="Directory containing FinOps Lite output CSV files (overview.csv, services.csv, focus-lite.csv).",
+)
+def analyze(input_path):
+    """Analyze FinOps Lite outputs and report cost changes.
+
+    v0.2 behavior:
+      1. Load FinOps Lite outputs
+      2. Build a simple rolling baseline per service
+      3. Compare the latest day to that baseline
+      4. Print any material service-level changes
     """
-    ctx.ensure_object(dict)
-    ctx.obj['profile'] = profile
-    
-    if verbose:
-        logging.getLogger().setLevel(logging.DEBUG)
+    click.echo("🔍 FinOps Watchdog – FinOps Lite integration check")
+    click.echo(f"   Input directory: {input_path}")
 
-
-@cli.command()
-@click.option('--days', default=30, help='Number of days to analyze (default: 30)')
-@click.option('--sensitivity', default='medium', type=click.Choice(['low', 'medium', 'high']), 
-              help='Detection sensitivity level')
-@click.option('--alert-types', default='console', help='Alert types (console,slack)')
-@click.option('--slack-webhook', default=None, help='Slack webhook URL for notifications')
-@click.option('--export', default=None, help='Export results to file (JSON/YAML)')
-@click.option('--demo', is_flag=True, help='Run with sample data (no AWS setup needed)')
-@click.pass_context
-def detect(ctx, days, sensitivity, alert_types, slack_webhook, export, demo):
-    """Detect cost anomalies in your AWS spending."""
-    
-    console.print("🔍 FinOps Watchdog - Anomaly Detection", style="bold blue")
-    console.print(f"📊 Analyzing last {days} days with {sensitivity} sensitivity...\n")
-    
-    if demo:
-        console.print("🎭 Demo Mode - Using sample data", style="bold yellow")
-        import pandas as pd
-        import os
-        
-        # Load sample data
-        sample_file = os.path.join(os.path.dirname(__file__), '..', 'examples', 'sample_cost_data.csv')
-        if not os.path.exists(sample_file):
-            console.print("❌ Sample data file not found", style="red")
-            exit(1)
-            
-        daily_costs = pd.read_csv(sample_file)
-        daily_costs['date'] = pd.to_datetime(daily_costs['date']).dt.date
-        
-        # Run detection on sample data
-        detector = CostAnomalyDetector(sensitivity=sensitivity)
-        anomalies = detector.detect_daily_anomalies(daily_costs)
-        trends = detector.analyze_trends(daily_costs)
-        
-        _display_detection_summary(anomalies, trends, len(daily_costs))
-        
-        if anomalies:
-            alerter = AlertManager(slack_webhook=slack_webhook)
-            alert_type_list = [t.strip() for t in alert_types.split(',')]
-            alerter.send_anomaly_alerts(anomalies, alert_type_list)
-        
-        console.print("\n🎭 Demo completed! Try with real AWS data by removing --demo flag", style="bold blue")
-        exit(0)
-    
     try:
-        # Initialize components
-        collector = CostDataCollector(profile_name=ctx.obj['profile'])
-        detector = CostAnomalyDetector(sensitivity=sensitivity)
-        alerter = AlertManager(slack_webhook=slack_webhook)
-        
-        # Collect cost data
-        with console.status("[cyan]Collecting cost data from AWS..."):
-            daily_costs = collector.get_daily_costs(days=days)
-            service_costs = collector.get_service_costs(days=min(days, 14))  # Limit service analysis
-        
-        console.print(f"✅ Retrieved {len(daily_costs)} days of cost data")
-        
-        # Detect anomalies
-        with console.status("[cyan]Analyzing for anomalies..."):
-            daily_anomalies = detector.detect_daily_anomalies(daily_costs)
-            service_anomalies = detector.detect_service_anomalies(service_costs)
-            all_anomalies = daily_anomalies + service_anomalies
-        
-        # Generate trend analysis
-        trends = detector.analyze_trends(daily_costs)
-        
-        # Display results summary
-        _display_detection_summary(all_anomalies, trends, days)
-        
-        # Send alerts
-        if all_anomalies:
-            alert_type_list = [t.strip() for t in alert_types.split(',')]
-            alert_results = alerter.send_anomaly_alerts(all_anomalies, alert_type_list)
-            
-            if alert_results.get('errors'):
-                console.print("⚠️ Alert errors:", style="yellow")
-                for error in alert_results['errors']:
-                    console.print(f"  • {error}", style="red")
-        
-        # Export results if requested
-        if export and all_anomalies:
-            _export_results(all_anomalies, trends, export)
-        
-        # Exit code based on severity
-        critical_anomalies = [a for a in all_anomalies if a.severity.value == 'critical']
-        if critical_anomalies:
-            console.print(f"\n🔥 {len(critical_anomalies)} critical anomalies detected!", style="bold red")
-            exit(2)  # Exit code 2 for critical issues
-        elif all_anomalies:
-            exit(1)  # Exit code 1 for anomalies found
-        else:
-            console.print("\n✅ No anomalies detected - costs are within normal ranges", style="green")
-            exit(0)  # Exit code 0 for success
-            
-    except Exception as e:
-        console.print(f"❌ Error during anomaly detection: {e}", style="red")
-        if ctx.obj.get('verbose'):
-            import traceback
-            console.print(traceback.format_exc())
-        exit(3)  # Exit code 3 for errors
+        inputs = load_lite_outputs(input_path)
+    except FileNotFoundError as exc:
+        click.echo(f"❌ {exc}")
+        raise SystemExit(1)
 
+    click.echo("✅ Loaded FinOps Lite outputs:")
+    click.echo(f"   • overview.csv  – {len(inputs.overview)} rows")
+    click.echo(f"   • services.csv  – {len(inputs.services)} rows")
 
-@cli.command()
-@click.option('--days', default=7, help='Number of days to summarize (default: 7)')
-@click.pass_context
-def report(ctx, days):
-    """Generate a cost analysis report."""
-    
-    console.print("📋 FinOps Watchdog - Cost Report", style="bold blue")
-    
-    try:
-        # Initialize components
-        collector = CostDataCollector(profile_name=ctx.obj['profile'])
-        detector = CostAnomalyDetector(sensitivity='medium')
-        alerter = AlertManager()
-        
-        # Collect data
-        with console.status("[cyan]Generating report..."):
-            cost_summary = collector.get_cost_summary(days=days)
-            daily_costs = collector.get_daily_costs(days=days)
-            anomalies = detector.detect_daily_anomalies(daily_costs)
-        
-        # Generate and display report
-        report_text = alerter.generate_daily_report(anomalies, cost_summary)
-        console.print(Panel(report_text, title="Daily Cost Report", border_style="blue"))
-        
-    except Exception as e:
-        console.print(f"❌ Error generating report: {e}", style="red")
-        exit(1)
-
-
-@cli.command()
-@click.option('--days', default=30, help='Number of days to analyze (default: 30)')
-@click.pass_context
-def trends(ctx, days):
-    """Analyze cost trends and patterns."""
-    
-    console.print("📈 FinOps Watchdog - Trend Analysis", style="bold blue")
-    
-    try:
-        # Initialize components
-        collector = CostDataCollector(profile_name=ctx.obj['profile'])
-        detector = CostAnomalyDetector()
-        
-        # Collect and analyze data
-        with console.status("[cyan]Analyzing cost trends..."):
-            daily_costs = collector.get_daily_costs(days=days)
-            trends = detector.analyze_trends(daily_costs)
-        
-        # Display trend analysis
-        _display_trend_analysis(trends, daily_costs)
-        
-    except Exception as e:
-        console.print(f"❌ Error analyzing trends: {e}", style="red")
-        exit(1)
-
-
-@cli.command()
-@click.option('--webhook-url', prompt='Slack webhook URL', help='Slack webhook URL to test')
-def test_slack(webhook_url):
-    """Test Slack webhook integration."""
-    
-    console.print("🔔 Testing Slack Integration", style="bold blue")
-    
-    try:
-        from finops_watchdog.detector import Anomaly, AnomalyType, SeverityLevel
-        from datetime import date
-        
-        # Create test anomaly
-        test_anomaly = Anomaly(
-            date=date.today(),
-            anomaly_type=AnomalyType.COST_SPIKE,
-            severity=SeverityLevel.HIGH,
-            actual_cost=150.00,
-            expected_cost=75.00,
-            deviation_percentage=100.0,
-            service="Amazon EC2",
-            description="Test anomaly for Slack integration"
-        )
-        
-        alerter = AlertManager(slack_webhook=webhook_url)
-        alerter.send_anomaly_alerts([test_anomaly], ["slack"])
-        
-        console.print("✅ Test Slack alert sent successfully!", style="green")
-        
-    except Exception as e:
-        console.print(f"❌ Slack test failed: {e}", style="red")
-        exit(1)
-
-
-def _display_detection_summary(anomalies, trends, days):
-    """Display anomaly detection summary."""
-    
-    # Summary panel
-    if anomalies:
-        severity_counts = {}
-        for anomaly in anomalies:
-            severity_counts[anomaly.severity] = severity_counts.get(anomaly.severity, 0) + 1
-        
-        summary_lines = [f"🚨 Found {len(anomalies)} anomalies in {days} days"]
-        for severity, count in severity_counts.items():
-            emoji = {"critical": "🔥", "high": "⚠️", "medium": "⚡", "low": "📊"}.get(severity.value, "📊")
-            summary_lines.append(f"{emoji} {count} {severity.value.title()}")
+    if inputs.focus is not None:
+        click.echo(f"   • focus-lite.csv – {len(inputs.focus)} rows")
     else:
-        summary_lines = [f"✅ No anomalies detected in {days} days", "All costs within normal ranges"]
-    
-    console.print(Panel("\n".join(summary_lines), title="Detection Summary", border_style="blue"))
-    
-    # Trend summary
-    trend_text = f"📈 Trend: {trends['trend_direction'].title()} ({trends['volatility_level']} volatility)"
-    if trends['data_quality'] == 'limited':
-        trend_text += "\n⚠️ Limited cost data available for analysis"
-    
-    console.print(Panel(trend_text, title="Cost Trends", border_style="green"))
+        click.echo("   • focus-lite.csv – not found (optional)")
 
+    services_df = inputs.services.copy()
 
-def _display_trend_analysis(trends, daily_costs):
-    """Display detailed trend analysis."""
-    
-    # Trend table
-    trend_table = Table(title="Cost Trend Analysis")
-    trend_table.add_column("Metric", style="cyan")
-    trend_table.add_column("Value", style="white")
-    
-    trend_table.add_row("Trend Direction", trends['trend_direction'].title())
-    trend_table.add_row("Trend Magnitude", f"{trends['trend_magnitude_pct']:.1f}%")
-    trend_table.add_row("Recent Daily Average", f"${trends['recent_avg_daily']:.2f}")
-    trend_table.add_row("Previous Daily Average", f"${trends['previous_avg_daily']:.2f}")
-    trend_table.add_row("Volatility Level", trends['volatility_level'].title())
-    trend_table.add_row("Volatility Score", f"{trends['volatility']:.2f}")
-    trend_table.add_row("Days Analyzed", str(trends['total_days_analyzed']))
-    trend_table.add_row("Data Quality", trends['data_quality'].title())
-    
-    console.print(trend_table)
-    
-    # Recent costs table
-    if len(daily_costs) > 0:
-        recent_table = Table(title="Recent Daily Costs")
-        recent_table.add_column("Date", style="cyan")
-        recent_table.add_column("Cost", style="white")
-        recent_table.add_column("Change", style="yellow")
-        
-        recent_costs = daily_costs.tail(7).reset_index(drop=True)
-        for i, row in recent_costs.iterrows():
-            change = ""
-            if i > 0:
-                prev_cost = recent_costs.iloc[i-1]['total_cost']
-                if prev_cost > 0:
-                    change_pct = (row['total_cost'] - prev_cost) / prev_cost * 100
-                    change = f"{change_pct:+.1f}%"
-            
-            recent_table.add_row(str(row['date']), f"${row['total_cost']:.2f}", change)
-        
-        console.print(recent_table)
+    # Basic schema check for services.csv
+    required_cols = {"date", "service", "cost"}
+    missing = required_cols - set(services_df.columns)
+    if missing:
+        click.echo(f"\n⚠️ services.csv is missing required columns: {', '.join(sorted(missing))}")
+        click.echo("   Expected at least: date, service, cost")
+        raise SystemExit(1)
 
-
-def _export_results(anomalies, trends, export_path):
-    """Export results to file."""
-    
+    # Build baseline
     try:
-        data = {
-            "timestamp": str(datetime.now()),
-            "anomalies": [
+        baseline = build_service_baseline(services_df, window_days=14)
+    except Exception as exc:
+        click.echo(f"\n⚠️ Could not build baseline: {exc}")
+        raise SystemExit(1)
+
+    services_df["date"] = pd.to_datetime(services_df["date"])
+    services_df = services_df.sort_values("date")
+    current_date = services_df["date"].max()
+
+    today = (
+        services_df[services_df["date"] == current_date]
+        .groupby("service")["cost"]
+        .sum()
+    )
+
+    findings = []
+
+    # Simple thresholds for "material" changes
+    MIN_ABS_DELTA = 10.0   # dollars
+    MIN_PCT_DELTA = 0.20   # 20%
+
+    all_services = set(today.index) | set(baseline.daily_avg.index)
+
+    for service in sorted(all_services):
+        baseline_cost = float(baseline.daily_avg.get(service, 0.0))
+        current_cost = float(today.get(service, 0.0))
+
+        # Ignore tiny noise where both are near zero
+        if baseline_cost == 0 and current_cost == 0:
+            continue
+
+        # New service: no baseline, non-trivial current cost
+        if baseline_cost == 0 and current_cost >= MIN_ABS_DELTA:
+            findings.append(
                 {
-                    "date": str(a.date),
-                    "type": a.anomaly_type.value,
-                    "severity": a.severity.value,
-                    "actual_cost": a.actual_cost,
-                    "expected_cost": a.expected_cost,
-                    "deviation_percentage": a.deviation_percentage,
-                    "service": a.service,
-                    "description": a.description,
-                    "confidence_score": a.confidence_score
+                    "service": service,
+                    "current_cost": current_cost,
+                    "baseline_cost": baseline_cost,
+                    "abs_delta": current_cost,
+                    "pct_delta": None,
+                    "direction": "new spend",
+                    "severity": "MEDIUM",
+                    "kind": "new",
                 }
-                for a in anomalies
-            ],
-            "trends": trends
-        }
-        
-        if export_path.lower().endswith('.yaml') or export_path.lower().endswith('.yml'):
-            with open(export_path, 'w') as f:
-                yaml.dump(data, f, default_flow_style=False)
+            )
+            continue
+
+        # Service dropped to (or near) zero
+        if baseline_cost > 0 and current_cost == 0:
+            abs_delta = 0 - baseline_cost
+            pct_delta = abs_delta / baseline_cost
+            if abs(abs_delta) < MIN_ABS_DELTA and abs(pct_delta) < MIN_PCT_DELTA:
+                continue
+
+            severity = "HIGH" if abs(pct_delta) >= 0.5 or abs(abs_delta) >= 100 else "MEDIUM"
+            findings.append(
+                {
+                    "service": service,
+                    "current_cost": current_cost,
+                    "baseline_cost": baseline_cost,
+                    "abs_delta": abs_delta,
+                    "pct_delta": pct_delta,
+                    "direction": "decrease",
+                    "severity": severity,
+                    "kind": "drop",
+                }
+            )
+            continue
+
+        # Normal delta with both baseline and current
+        abs_delta = current_cost - baseline_cost
+        pct_delta = abs_delta / baseline_cost if baseline_cost else None
+
+        if abs(abs_delta) < MIN_ABS_DELTA and (pct_delta is None or abs(pct_delta) < MIN_PCT_DELTA):
+            continue
+
+        direction = "increase" if abs_delta > 0 else "decrease"
+        severity = "HIGH" if (pct_delta is not None and abs(pct_delta) >= 0.5) or abs(abs_delta) >= 100 else "MEDIUM"
+
+        findings.append(
+            {
+                "service": service,
+                "current_cost": current_cost,
+                "baseline_cost": baseline_cost,
+                "abs_delta": abs_delta,
+                "pct_delta": pct_delta,
+                "direction": direction,
+                "severity": severity,
+                "kind": "change",
+            }
+        )
+
+    if not findings:
+        click.echo("\n✅ No material service-level changes versus the baseline window.")
+        click.echo(
+            f"   Baseline window: {baseline.reference_start.date()} → {baseline.reference_end.date()}"
+        )
+        click.echo(f"   Services tracked: {len(all_services)}")
+        raise SystemExit(0)
+
+    click.echo("\n🚨 Service-level changes versus baseline:")
+    click.echo(
+        f"   Baseline window: {baseline.reference_start.date()} → {baseline.reference_end.date()}"
+    )
+    click.echo(f"   Services tracked: {len(all_services)}")
+    click.echo(f"   Findings: {len(findings)}")
+
+    # Sort by absolute percentage change (when available), then by abs dollar change
+    def _sort_key(f):
+        pct = abs(f["pct_delta"]) if f["pct_delta"] is not None else 0.0
+        return (pct, abs(f["abs_delta"]))
+
+    findings.sort(key=_sort_key, reverse=True)
+
+    for f in findings:
+        pct_str = ""
+        if f["pct_delta"] is not None:
+            pct_str = f" ({f['pct_delta'] * 100:.1f}%)"
+
+        abs_delta = f["abs_delta"]
+        # Format as +$X.XX or -$X.XX
+        if abs_delta > 0:
+            delta_str = f"+${abs_delta:.2f}"
         else:
-            with open(export_path, 'w') as f:
-                json.dump(data, f, indent=2)
-        
-        console.print(f"✅ Results exported to {export_path}", style="green")
-        
-    except Exception as e:
-        console.print(f"❌ Export failed: {e}", style="red")
+            delta_str = f"-${abs(abs_delta):.2f}"
+
+        if f["kind"] == "new":
+            click.echo(
+                f"   • [{f['severity']}] {f['service']}: new spend {delta_str} vs no baseline"
+            )
+        elif f["kind"] == "drop":
+            click.echo(
+                f"   • [{f['severity']}] {f['service']}: decrease {delta_str}{pct_str} "
+                f"vs baseline (${f['baseline_cost']:.2f} → ${f['current_cost']:.2f})"
+            )
+        else:
+            click.echo(
+                f"   • [{f['severity']}] {f['service']}: {f['direction']} {delta_str}{pct_str} "
+                f"vs baseline (${f['baseline_cost']:.2f} → ${f['current_cost']:.2f})"
+            )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     cli()
