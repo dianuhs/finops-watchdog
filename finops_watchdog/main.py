@@ -3,6 +3,7 @@ import pandas as pd
 
 from .ingest import load_lite_outputs
 from .baselines.window import build_service_baseline
+from .analysis import classify_change
 
 
 @click.group()
@@ -22,11 +23,13 @@ def cli():
 def analyze(input_path):
     """Analyze FinOps Lite outputs and report cost changes.
 
-    v0.2 behavior:
+    v0.3 behavior:
+
       1. Load FinOps Lite outputs
-      2. Build a simple rolling baseline per service
+      2. Build a rolling baseline per service
       3. Compare the latest day to that baseline
-      4. Print any material service-level changes
+      4. Classify changes as spike, drift, new spend, or drop
+      5. Print human-readable explanations for each material change
     """
     click.echo("🔍 FinOps Watchdog – FinOps Lite integration check")
     click.echo(f"   Input directory: {input_path}")
@@ -67,6 +70,14 @@ def analyze(input_path):
     services_df = services_df.sort_values("date")
     current_date = services_df["date"].max()
 
+    # Daily cost per service
+    daily_service = (
+        services_df.groupby(["service", "date"])["cost"]
+        .sum()
+        .sort_index()
+    )
+
+    # Today's per-service cost
     today = (
         services_df[services_df["date"] == current_date]
         .groupby("service")["cost"]
@@ -75,7 +86,7 @@ def analyze(input_path):
 
     findings = []
 
-    # Simple thresholds for "material" changes
+    # Thresholds for "material" changes
     MIN_ABS_DELTA = 10.0   # dollars
     MIN_PCT_DELTA = 0.20   # 20%
 
@@ -89,53 +100,48 @@ def analyze(input_path):
         if baseline_cost == 0 and current_cost == 0:
             continue
 
-        # New service: no baseline, non-trivial current cost
-        if baseline_cost == 0 and current_cost >= MIN_ABS_DELTA:
-            findings.append(
-                {
-                    "service": service,
-                    "current_cost": current_cost,
-                    "baseline_cost": baseline_cost,
-                    "abs_delta": current_cost,
-                    "pct_delta": None,
-                    "direction": "new spend",
-                    "severity": "MEDIUM",
-                    "kind": "new",
-                }
-            )
-            continue
+        # Build recent cost history for this service (excluding current day)
+        recent_costs = []
+        try:
+            service_series = daily_service.loc[service]
+            if hasattr(service_series, "index"):
+                history = service_series[service_series.index < current_date]
+                if len(history) > 0:
+                    # Take up to the last 7 days of history
+                    recent_costs = list(history.tail(7).values)
+        except KeyError:
+            recent_costs = []
 
-        # Service dropped to (or near) zero
-        if baseline_cost > 0 and current_cost == 0:
-            abs_delta = 0 - baseline_cost
-            pct_delta = abs_delta / baseline_cost
-            if abs(abs_delta) < MIN_ABS_DELTA and abs(pct_delta) < MIN_PCT_DELTA:
-                continue
-
-            severity = "HIGH" if abs(pct_delta) >= 0.5 or abs(abs_delta) >= 100 else "MEDIUM"
-            findings.append(
-                {
-                    "service": service,
-                    "current_cost": current_cost,
-                    "baseline_cost": baseline_cost,
-                    "abs_delta": abs_delta,
-                    "pct_delta": pct_delta,
-                    "direction": "decrease",
-                    "severity": severity,
-                    "kind": "drop",
-                }
-            )
-            continue
-
-        # Normal delta with both baseline and current
         abs_delta = current_cost - baseline_cost
-        pct_delta = abs_delta / baseline_cost if baseline_cost else None
+        pct_delta = None
+        if baseline_cost > 0:
+            pct_delta = abs_delta / baseline_cost
 
-        if abs(abs_delta) < MIN_ABS_DELTA and (pct_delta is None or abs(pct_delta) < MIN_PCT_DELTA):
+        # Run classification (spike / drift / new / drop)
+        cls = classify_change(
+            baseline_cost=baseline_cost,
+            recent_costs=recent_costs,
+            current_cost=current_cost,
+            min_abs_delta=MIN_ABS_DELTA,
+        )
+
+        if cls is None:
+            # Either below absolute threshold or not enough history to reason about
             continue
 
-        direction = "increase" if abs_delta > 0 else "decrease"
-        severity = "HIGH" if (pct_delta is not None and abs(pct_delta) >= 0.5) or abs(abs_delta) >= 100 else "MEDIUM"
+        # Additional relative filter for non-new/non-drop changes
+        if cls.kind not in ("new", "drop") and pct_delta is not None and abs(pct_delta) < MIN_PCT_DELTA:
+            continue
+
+        # Optionally bump severity based on percent / dollars
+        severity = cls.severity
+        if pct_delta is not None:
+            if abs(pct_delta) >= 0.5 or abs(abs_delta) >= 100:
+                severity = "HIGH"
+            elif abs(pct_delta) >= 0.3 or abs(abs_delta) >= 50:
+                severity = max(severity, "MEDIUM")
+        elif abs(abs_delta) >= 200:
+            severity = "HIGH"
 
         findings.append(
             {
@@ -144,9 +150,10 @@ def analyze(input_path):
                 "baseline_cost": baseline_cost,
                 "abs_delta": abs_delta,
                 "pct_delta": pct_delta,
-                "direction": direction,
+                "kind": cls.kind,
                 "severity": severity,
-                "kind": "change",
+                "explanation": cls.explanation,
+                "confidence": cls.confidence,
             }
         )
 
@@ -178,26 +185,19 @@ def analyze(input_path):
             pct_str = f" ({f['pct_delta'] * 100:.1f}%)"
 
         abs_delta = f["abs_delta"]
-        # Format as +$X.XX or -$X.XX
         if abs_delta > 0:
             delta_str = f"+${abs_delta:.2f}"
         else:
             delta_str = f"-${abs(abs_delta):.2f}"
 
-        if f["kind"] == "new":
-            click.echo(
-                f"   • [{f['severity']}] {f['service']}: new spend {delta_str} vs no baseline"
-            )
-        elif f["kind"] == "drop":
-            click.echo(
-                f"   • [{f['severity']}] {f['service']}: decrease {delta_str}{pct_str} "
-                f"vs baseline (${f['baseline_cost']:.2f} → ${f['current_cost']:.2f})"
-            )
-        else:
-            click.echo(
-                f"   • [{f['severity']}] {f['service']}: {f['direction']} {delta_str}{pct_str} "
-                f"vs baseline (${f['baseline_cost']:.2f} → ${f['current_cost']:.2f})"
-            )
+        kind_label = f["kind"].upper()
+
+        click.echo(
+            f"   • [{f['severity']}] [{kind_label}] {f['service']}: "
+            f"{delta_str}{pct_str} vs baseline "
+            f"(${f['baseline_cost']:.2f} → ${f['current_cost']:.2f})"
+        )
+        click.echo(f"     Reason: {f['explanation']} (confidence {f['confidence']:.1f})")
 
 
 if __name__ == "__main__":
