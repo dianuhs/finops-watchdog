@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
-> Detect meaningful cloud cost changes relative to known baselines — not opaque models.
+> Detect meaningful cloud cost changes relative to known baselines — clearly, deterministically, and with context.
 
 ---
 
@@ -15,82 +15,59 @@
 
 FinOps Watchdog is a cost change detection tool designed to sit **on top of FinOps Lite**.
 
-It does not pull raw billing data.  
-It does not rely on black-box anomaly models.  
+It does not ingest raw billing data.  
+It does not rely on opaque statistical models.  
 It does not generate dashboards.
 
-Instead, Watchdog consumes **deterministic, explainable cost outputs** from FinOps Lite and answers a narrower, more practical question:
+Instead, Watchdog consumes **explicit, explainable cost outputs** from FinOps Lite and answers a narrower, more operational question:
 
-> Given what we already know about our costs, what changed — and which changes deserve attention?
+> Given what we already understand about our costs, what changed — and which changes deserve attention?
 
-This makes Watchdog suitable for FinOps reviews, automation, and post-incident analysis where explainability matters.
+The result is a tool suited for FinOps reviews, automated checks, and post-incident analysis where clarity and traceability matter.
 
 ---
 
 ## How It Fits
 
-FinOps Watchdog is the second layer in a deliberate stack:
+FinOps Watchdog is the second layer in a deliberately separated stack:
 
-- **FinOps Lite** → cost truth and reasoning  
+- **FinOps Lite** → cost structure and reasoning  
 - **FinOps Watchdog** → change detection and guardrails  
-- **Recovery Economics (future)** → cost-to-value decisions  
-
-The separation is intentional.
+- **Recovery Economics (next)** → cost-to-value decisions  
 
 FinOps Lite establishes *what is true*.  
 Watchdog highlights *what is different*.
+
+This separation keeps change detection focused, auditable, and easy to reason about.
 
 ---
 
 ## What Watchdog Does
 
 - Compares current spend to explicit historical baselines
-- Detects deviations relative to what is already considered normal
-- Attributes changes to services, regions, or accounts
-- Distinguishes one-time spikes from sustained drift
-- Produces findings that are inspectable, auditable, and reproducible
+- Detects service-level deviations relative to recent behavior
+- Classifies changes as spikes, drops, drift, or new spend
+- Produces findings that are inspectable and reproducible
+- Prints human-readable interpretations designed for review, not alerts alone
 
-Every finding can be traced back to:
-- a known cost window
-- a known breakdown
-- a known baseline
+Every finding is grounded in:
+- a known time window  
+- a known service breakdown  
+- a known baseline  
 
-If it can’t be explained, it isn’t flagged.
-
----
-
-## Why Not Just Use AWS Budgets or Cost Anomaly Detection?
-
-AWS tools are optimized for AWS’s perspective:
-
-- **Budgets** rely on static thresholds  
-- **Anomaly Detection** uses opaque statistical models  
-- Attribution is limited  
-- Post-hoc auditability is weak  
-
-They are useful guardrails, but they do not explain change.
-
-Watchdog is optimized for FinOps workflows:
-
-- baselines you can inspect
-- windows you define explicitly
-- deltas you can reason about
-- findings you can defend in a review or post-mortem
-
-AWS may tell you *that* something is anomalous.  
-Watchdog tells you *what changed, where, and relative to what*.
+If a change can’t be explained, it isn’t flagged.
 
 ---
 
-## Input Contract (Required)
+## Input Contract
 
-FinOps Watchdog **does not** query AWS Cost Explorer directly.
+FinOps Watchdog does **not** query AWS Cost Explorer directly.
 
-It consumes outputs produced by FinOps Lite, such as:
+It consumes outputs produced by FinOps Lite, including:
 
-- cost overviews (time-window totals)
-- service-level breakdowns
-- FOCUS-aligned (FOCUS-lite) CSV exports
+- time-window cost overviews  
+- service-level daily spend  
+- optional FOCUS-lite CSVs  
 
 This makes Watchdog deterministic, testable, and automation-ready.
 
@@ -114,25 +91,26 @@ finops-watchdog/
 ## Example Finding
 
 ```text
-EC2 spend increased +$47.82 (+37%) versus the prior 14-day baseline.
-82% of the increase is concentrated in us-east-1.
-Change began 2 days ago and persists.
+[HIGH] AmazonEC2 — spike
+
+Current:   $180.00 / day
+Baseline:  $105.00 / day
+Delta:     +$75.00 (71.4%)
+
+Interpretation:
+Spend shows an abrupt increase relative to the recent baseline, consistent
+with a short-lived deviation rather than a gradual shift in usage.
 ```
 
-This is the unit of output Watchdog optimizes for.
+This is the unit of output Watchdog is optimized for.
 
 ---
 
 ## What It Looks Like
 
-*Explainable change detection with clear attribution*  
-<img src="docs/images/anomaly-detection.png" alt="Watchdog Findings Output" width="600">
+*Service-level change detection with clear baselines and interpretation*
 
-*CLI-first workflow designed for automation*  
-<img src="docs/images/help-menu.png" alt="CLI Help Menu" width="600">
-
-*Trend context to distinguish spikes from drift*  
-<img src="docs/images/trend-analysis.png" alt="Trend Analysis" width="400">
+<img src="docs/images/watchdog-findings.png" alt="FinOps Watchdog findings output" width="720">
 
 ---
 
@@ -143,48 +121,46 @@ This is the unit of output Watchdog optimizes for.
 finops cost overview --days 30
 finops cost services --days 30
 
-# Analyze changes using Watchdog
+# Analyze changes with Watchdog
 finops-watchdog analyze --input ./finops-lite/outputs/latest
 ```
 
-Watchdog exits with non-zero codes when actionable changes are detected, making it suitable for CI, cron jobs, and automated checks.
+Watchdog exits with a non-zero status code when material changes are detected, making it suitable for CI, cron jobs, and automated checks.
 
 ---
 
 ## Design Principles
 
 - Explainability over cleverness  
-- Baselines over heuristics  
-- Practitioner control over vendor abstraction  
+- Explicit baselines over heuristics  
+- Practitioner control over abstraction  
 - Reasoning before reaction  
 
 ---
 
 ## Versioning
 
-**Current version: v0.2**
+**Current version: v0.3**
 
-This release formalizes Watchdog as a second-layer tool that depends on FinOps Lite outputs.
-
-Future versions will deepen attribution and baseline strategies — not add dashboards or black-box models.
+This release formalizes Watchdog as a baseline-aware, FinOps-native change detection layer built on FinOps Lite outputs.
 
 ---
 
 ## Roadmap
 
 **Now**
-- Baseline-aware change detection
-- Service-level attribution
-- CLI-first automation support
+- Service-level baseline comparisons  
+- Spike, drop, and drift classification  
+- CLI-first, automation-friendly output  
 
 **Next**
-- Weekday-aware and persistence-based baselines
-- Optional notification hooks (Slack, email)
-- Shared schema contracts with FinOps Lite
+- Persistence-aware baselines  
+- Optional notification hooks  
+- Shared schema contracts with FinOps Lite  
 
 **Later**
-- Recovery Economics workflows (cost → value)
-- Change classification tied to deployments or incidents
+- Recovery Economics workflows  
+- Cost change classification tied to deployments or incidents  
 
 ---
 
@@ -210,6 +186,6 @@ MIT License — see [LICENSE](LICENSE)
 
 FinOps Watchdog exists because cost visibility without change awareness is incomplete.
 
-It does not replace AWS tools.  
-It sits above them — closer to how FinOps decisions are actually made.
+It does not compete for attention.  
+It adds context — exactly where FinOps decisions are made.
 
