@@ -43,16 +43,6 @@ Watchdog answers *“what is different, relative to what we already know.”*
 
 ## Architecture at a Glance
 
-```mermaid
-flowchart LR
-  A[Raw billing data] -->|normalize & baseline| B[FinOps Lite]
-  B -->|FOCUS-lite exports| C[FinOps Watchdog]
-  C -->|cost behavior signals| D[Recovery Economics]
-
-  style B fill:#f5eee9,stroke:#ccc
-  style C fill:#e9f3f2,stroke:#7aa7a5,stroke-width:2px
-  style D fill:#f5eee9,stroke:#ccc
-
   ```text
 Raw billing data
       ↓
@@ -168,4 +158,5 @@ Because inputs are exported snapshots, you can re-run historical periods to repr
 ## License
 
 MIT License — see [LICENSE](LICENSE)
+
 
