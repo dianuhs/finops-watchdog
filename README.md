@@ -43,7 +43,7 @@ Watchdog answers *“what is different, relative to what we already know.”*
 
 ## Architecture at a Glance
 
-  ```text
+```text
 Raw billing data
       ↓
 FinOps Lite
@@ -54,6 +54,7 @@ FinOps Watchdog
       ↓
 Recovery Economics
   (value, risk, recovery trade-offs)
+```
 
 - **FinOps Lite** normalizes billing data and emits baseline views and FOCUS-lite exports.  
 - **Watchdog** consumes those exports and focuses on change against baseline.  
@@ -108,15 +109,15 @@ finops-watchdog analyze   --input outputs/latest   --baseline-window 30   --min-
 
 ### Key flags
 
-| Flag                | Type     | Default   | Description |
-|---------------------|----------|-----------|-------------|
-| `--input`           | path     | required  | Directory containing FinOps Lite exports. |
-| `--baseline-window` | integer  | `30`      | Number of trailing days to treat as the baseline window. |
-| `--min-delta-amount`| float    | `0`       | Minimum absolute daily delta (in currency units) required before a change is considered. |
-| `--min-delta-percent` | float  | `0.0`     | Minimum relative delta (e.g. `0.25` = 25%) required before a change is considered. |
-| `--severity-threshold` | choice | `medium` | Minimum severity level to include in the output (`low`, `medium`, `high`). |
-| `--format`          | choice   | `text`    | Output format (`text` for human review, `json` for automation). |
-| `--output`          | path     | `-`       | Optional path to write results; defaults to stdout. |
+| Flag                  | Type     | Default   | Description |
+|-----------------------|----------|-----------|-------------|
+| `--input`             | path     | required  | Directory containing FinOps Lite exports. |
+| `--baseline-window`   | integer  | `30`      | Number of trailing days to treat as the baseline window. |
+| `--min-delta-amount`  | float    | `0`       | Minimum absolute daily delta (in currency units) required before a change is considered. |
+| `--min-delta-percent` | float    | `0.0`     | Minimum relative delta (e.g. `0.25` = 25%) required before a change is considered. |
+| `--severity-threshold`| choice   | `medium`  | Minimum severity level to include in the output (`low`, `medium`, `high`). |
+| `--format`            | choice   | `text`    | Output format (`text` for human review, `json` for automation). |
+| `--output`            | path     | `-`       | Optional path to write results; defaults to stdout. |
 
 These flags are intentionally small in number and tuned for review workflows:  
 you set a baseline window, choose how sensitive you want the detector to be, and decide how you want the results rendered.
@@ -158,5 +159,3 @@ Because inputs are exported snapshots, you can re-run historical periods to repr
 ## License
 
 MIT License — see [LICENSE](LICENSE)
-
-
