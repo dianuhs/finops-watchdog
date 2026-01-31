@@ -44,23 +44,26 @@ Watchdog answers *“what is different, relative to what we already know.”*
 ## Architecture at a Glance
 
 ```mermaid
-graph TD
-  A[Raw billing data] --> B[FinOps Lite]
-  B -->|Baselines & FOCUS-lite exports| C[FinOps Watchdog]
-  C --> D[Recovery Economics]
+flowchart LR
+  A[Raw billing data] -->|normalize & baseline| B[FinOps Lite]
+  B -->|FOCUS-lite exports| C[FinOps Watchdog]
+  C -->|cost behavior signals| D[Recovery Economics]
 
-  subgraph FinOps Lite
-    B
-  end
+  style B fill:#f5eee9,stroke:#ccc
+  style C fill:#e9f3f2,stroke:#7aa7a5,stroke-width:2px
+  style D fill:#f5eee9,stroke:#ccc
 
-  subgraph Watchdog
-    C
-  end
-
-  subgraph Recovery Economics
-    D
-  end
-```
+  ```text
+Raw billing data
+      ↓
+FinOps Lite
+  (normalize, baseline, FOCUS-lite)
+      ↓
+FinOps Watchdog
+  (detect & interpret change)
+      ↓
+Recovery Economics
+  (value, risk, recovery trade-offs)
 
 - **FinOps Lite** normalizes billing data and emits baseline views and FOCUS-lite exports.  
 - **Watchdog** consumes those exports and focuses on change against baseline.  
@@ -165,3 +168,4 @@ Because inputs are exported snapshots, you can re-run historical periods to repr
 ## License
 
 MIT License — see [LICENSE](LICENSE)
+
