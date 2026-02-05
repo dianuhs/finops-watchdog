@@ -1,335 +1,354 @@
 #!/usr/bin/env python3
-"""
-FinOps Watchdog - AWS Cost Anomaly Detection and Alerting CLI
-"""
-import click
-import logging
-from datetime import datetime
-from finops_watchdog.data_collector import CostDataCollector
-from finops_watchdog.detector import CostAnomalyDetector
-from finops_watchdog.alerter import AlertManager
-from rich.console import Console
-from rich.table import Table
-from rich.panel import Panel
+"""FinOps Watchdog v0.1 CLI."""
+
+from __future__ import annotations
+
+import csv
+import io
 import json
+import re
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List
+
+import click
+import pandas as pd
 import yaml
 
-console = Console()
+SCHEMA_VERSION = "1.0"
 
-# Set up logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+
+class InputFileError(Exception):
+    """Raised when the input file cannot be opened or read."""
+
+
+class SchemaDataError(Exception):
+    """Raised when CSV schema or data is invalid."""
+
+
+@dataclass(frozen=True)
+class DetectConfig:
+    """Runtime configuration for a detect invocation."""
+
+    input_path: Path
+    time_column: str
+    value_column: str
+    group_by: str
+    window: str
+    window_days: int
+    threshold: float
+    min_amount: float
+    output_format: str
+
 
 @click.group()
-@click.option('--profile', default=None, help='AWS profile to use')
-@click.option('--verbose', '-v', is_flag=True, help='Enable verbose logging')
-@click.pass_context
-def cli(ctx, profile, verbose):
-    """FinOps Watchdog - AWS Cost Anomaly Detection and Alerting
-    
-    Automatically detect unusual spending patterns in your AWS costs
-    and get alerted before small problems become expensive surprises.
-    """
-    ctx.ensure_object(dict)
-    ctx.obj['profile'] = profile
-    
-    if verbose:
-        logging.getLogger().setLevel(logging.DEBUG)
+def cli() -> None:
+    """FinOps Watchdog v0.1."""
+
+
+def _window_callback(_: click.Context, __: click.Option, value: str) -> str:
+    try:
+        _parse_window_days(value)
+    except ValueError as exc:
+        raise click.BadParameter(str(exc)) from exc
+    return value
 
 
 @cli.command()
-@click.option('--days', default=30, help='Number of days to analyze (default: 30)')
-@click.option('--sensitivity', default='medium', type=click.Choice(['low', 'medium', 'high']), 
-              help='Detection sensitivity level')
-@click.option('--alert-types', default='console', help='Alert types (console,slack)')
-@click.option('--slack-webhook', default=None, help='Slack webhook URL for notifications')
-@click.option('--export', default=None, help='Export results to file (JSON/YAML)')
-@click.option('--demo', is_flag=True, help='Run with sample data (no AWS setup needed)')
+@click.option(
+    "--input",
+    "input_path",
+    type=click.Path(path_type=Path, dir_okay=False),
+    required=True,
+    help="Path to input CSV file.",
+)
+@click.option("--time-column", required=True, help="Timestamp column name.")
+@click.option("--value-column", required=True, help="Numeric cost column name.")
+@click.option("--group-by", required=True, help="Grouping column name.")
+@click.option(
+    "--output-format",
+    type=click.Choice(["json", "csv", "yaml"], case_sensitive=False),
+    required=True,
+    help="Output format.",
+)
+@click.option(
+    "--window",
+    default="30d",
+    show_default=True,
+    callback=_window_callback,
+    help="Lookback window in days (for example: 30d).",
+)
+@click.option(
+    "--threshold",
+    type=click.FloatRange(min=0.0, min_open=True),
+    default=3.0,
+    show_default=True,
+    help="Anomaly threshold measured in standard deviations above baseline.",
+)
+@click.option(
+    "--min-amount",
+    type=click.FloatRange(min=0.0),
+    default=0.0,
+    show_default=True,
+    help="Ignore anomalies below this absolute delta.",
+)
 @click.pass_context
-def detect(ctx, days, sensitivity, alert_types, slack_webhook, export, demo):
-    """Detect cost anomalies in your AWS spending."""
-    
-    console.print("🔍 FinOps Watchdog - Anomaly Detection", style="bold blue")
-    console.print(f"📊 Analyzing last {days} days with {sensitivity} sensitivity...\n")
-    
-    if demo:
-        console.print("🎭 Demo Mode - Using sample data", style="bold yellow")
-        import pandas as pd
-        import os
-        
-        # Load sample data
-        sample_file = os.path.join(os.path.dirname(__file__), '..', 'examples', 'sample_cost_data.csv')
-        if not os.path.exists(sample_file):
-            console.print("❌ Sample data file not found", style="red")
-            exit(1)
-            
-        daily_costs = pd.read_csv(sample_file)
-        daily_costs['date'] = pd.to_datetime(daily_costs['date']).dt.date
-        
-        # Run detection on sample data
-        detector = CostAnomalyDetector(sensitivity=sensitivity)
-        anomalies = detector.detect_daily_anomalies(daily_costs)
-        trends = detector.analyze_trends(daily_costs)
-        
-        _display_detection_summary(anomalies, trends, len(daily_costs))
-        
-        if anomalies:
-            alerter = AlertManager(slack_webhook=slack_webhook)
-            alert_type_list = [t.strip() for t in alert_types.split(',')]
-            alerter.send_anomaly_alerts(anomalies, alert_type_list)
-        
-        console.print("\n🎭 Demo completed! Try with real AWS data by removing --demo flag", style="bold blue")
-        exit(0)
-    
+def detect(
+    ctx: click.Context,
+    input_path: Path,
+    time_column: str,
+    value_column: str,
+    group_by: str,
+    output_format: str,
+    window: str,
+    threshold: float,
+    min_amount: float,
+) -> None:
+    """Detect spend anomalies from a local CSV file."""
+
+    config = DetectConfig(
+        input_path=input_path,
+        time_column=time_column,
+        value_column=value_column,
+        group_by=group_by,
+        output_format=output_format.lower(),
+        window=window,
+        window_days=_parse_window_days(window),
+        threshold=threshold,
+        min_amount=min_amount,
+    )
+
     try:
-        # Initialize components
-        collector = CostDataCollector(profile_name=ctx.obj['profile'])
-        detector = CostAnomalyDetector(sensitivity=sensitivity)
-        alerter = AlertManager(slack_webhook=slack_webhook)
-        
-        # Collect cost data
-        with console.status("[cyan]Collecting cost data from AWS..."):
-            daily_costs = collector.get_daily_costs(days=days)
-            service_costs = collector.get_service_costs(days=min(days, 14))  # Limit service analysis
-        
-        console.print(f"✅ Retrieved {len(daily_costs)} days of cost data")
-        
-        # Detect anomalies
-        with console.status("[cyan]Analyzing for anomalies..."):
-            daily_anomalies = detector.detect_daily_anomalies(daily_costs)
-            service_anomalies = detector.detect_service_anomalies(service_costs)
-            all_anomalies = daily_anomalies + service_anomalies
-        
-        # Generate trend analysis
-        trends = detector.analyze_trends(daily_costs)
-        
-        # Display results summary
-        _display_detection_summary(all_anomalies, trends, days)
-        
-        # Send alerts
-        if all_anomalies:
-            alert_type_list = [t.strip() for t in alert_types.split(',')]
-            alert_results = alerter.send_anomaly_alerts(all_anomalies, alert_type_list)
-            
-            if alert_results.get('errors'):
-                console.print("⚠️ Alert errors:", style="yellow")
-                for error in alert_results['errors']:
-                    console.print(f"  • {error}", style="red")
-        
-        # Export results if requested
-        if export and all_anomalies:
-            _export_results(all_anomalies, trends, export)
-        
-        # Exit code based on severity
-        critical_anomalies = [a for a in all_anomalies if a.severity.value == 'critical']
-        if critical_anomalies:
-            console.print(f"\n🔥 {len(critical_anomalies)} critical anomalies detected!", style="bold red")
-            exit(2)  # Exit code 2 for critical issues
-        elif all_anomalies:
-            exit(1)  # Exit code 1 for anomalies found
-        else:
-            console.print("\n✅ No anomalies detected - costs are within normal ranges", style="green")
-            exit(0)  # Exit code 0 for success
-            
-    except Exception as e:
-        console.print(f"❌ Error during anomaly detection: {e}", style="red")
-        if ctx.obj.get('verbose'):
-            import traceback
-            console.print(traceback.format_exc())
-        exit(3)  # Exit code 3 for errors
+        payload = _run_detection(config)
+        _emit_payload(payload, config.output_format)
+    except InputFileError as exc:
+        click.echo(f"input file error: {exc}", err=True)
+        ctx.exit(3)
+    except SchemaDataError as exc:
+        click.echo(f"schema/data error: {exc}", err=True)
+        ctx.exit(4)
+    except Exception as exc:  # pragma: no cover - defensive top-level guard
+        click.echo(f"internal error: {exc}", err=True)
+        ctx.exit(5)
+
+    ctx.exit(0)
 
 
-@cli.command()
-@click.option('--days', default=7, help='Number of days to summarize (default: 7)')
-@click.pass_context
-def report(ctx, days):
-    """Generate a cost analysis report."""
-    
-    console.print("📋 FinOps Watchdog - Cost Report", style="bold blue")
-    
+def _parse_window_days(window: str) -> int:
+    match = re.fullmatch(r"([1-9]\d*)d", window.strip().lower())
+    if not match:
+        raise ValueError("window must match <days>d, for example 30d")
+    return int(match.group(1))
+
+
+def _run_detection(config: DetectConfig) -> Dict[str, Any]:
+    data = _load_csv(config.input_path)
+    prepared = _prepare_dataframe(
+        data,
+        time_column=config.time_column,
+        value_column=config.value_column,
+        group_by=config.group_by,
+    )
+    anomalies = _detect_anomalies(
+        prepared,
+        window_days=config.window_days,
+        threshold=config.threshold,
+        min_amount=config.min_amount,
+    )
+    return _build_payload(config, anomalies)
+
+
+def _load_csv(path: Path) -> pd.DataFrame:
+    if not path.exists():
+        raise InputFileError(f"file not found: {path}")
+    if not path.is_file():
+        raise InputFileError(f"not a file: {path}")
+
     try:
-        # Initialize components
-        collector = CostDataCollector(profile_name=ctx.obj['profile'])
-        detector = CostAnomalyDetector(sensitivity='medium')
-        alerter = AlertManager()
-        
-        # Collect data
-        with console.status("[cyan]Generating report..."):
-            cost_summary = collector.get_cost_summary(days=days)
-            daily_costs = collector.get_daily_costs(days=days)
-            anomalies = detector.detect_daily_anomalies(daily_costs)
-        
-        # Generate and display report
-        report_text = alerter.generate_daily_report(anomalies, cost_summary)
-        console.print(Panel(report_text, title="Daily Cost Report", border_style="blue"))
-        
-    except Exception as e:
-        console.print(f"❌ Error generating report: {e}", style="red")
-        exit(1)
+        return pd.read_csv(path)
+    except PermissionError as exc:
+        raise InputFileError(f"unreadable file: {path}") from exc
+    except FileNotFoundError as exc:
+        raise InputFileError(f"file not found: {path}") from exc
+    except pd.errors.EmptyDataError as exc:
+        raise SchemaDataError("input CSV is empty") from exc
+    except Exception as exc:
+        raise InputFileError(f"failed to read CSV: {exc}") from exc
 
 
-@cli.command()
-@click.option('--days', default=30, help='Number of days to analyze (default: 30)')
-@click.pass_context
-def trends(ctx, days):
-    """Analyze cost trends and patterns."""
-    
-    console.print("📈 FinOps Watchdog - Trend Analysis", style="bold blue")
-    
-    try:
-        # Initialize components
-        collector = CostDataCollector(profile_name=ctx.obj['profile'])
-        detector = CostAnomalyDetector()
-        
-        # Collect and analyze data
-        with console.status("[cyan]Analyzing cost trends..."):
-            daily_costs = collector.get_daily_costs(days=days)
-            trends = detector.analyze_trends(daily_costs)
-        
-        # Display trend analysis
-        _display_trend_analysis(trends, daily_costs)
-        
-    except Exception as e:
-        console.print(f"❌ Error analyzing trends: {e}", style="red")
-        exit(1)
+def _prepare_dataframe(
+    dataframe: pd.DataFrame,
+    *,
+    time_column: str,
+    value_column: str,
+    group_by: str,
+) -> pd.DataFrame:
+    required_columns = [time_column, value_column, group_by]
+    missing = [column for column in required_columns if column not in dataframe.columns]
+    if missing:
+        raise SchemaDataError(f"missing required columns: {', '.join(missing)}")
+
+    prepared = dataframe[[time_column, value_column, group_by]].copy()
+    prepared.columns = ["timestamp", "value", "group"]
+
+    prepared["timestamp"] = pd.to_datetime(prepared["timestamp"], errors="coerce", utc=True)
+    if prepared["timestamp"].isna().any():
+        raise SchemaDataError(f"invalid timestamp values in column '{time_column}'")
+
+    prepared["value"] = pd.to_numeric(prepared["value"], errors="coerce")
+    if prepared["value"].isna().any():
+        raise SchemaDataError(f"non-numeric values in column '{value_column}'")
+
+    if prepared["group"].isna().any():
+        raise SchemaDataError(f"missing group values in column '{group_by}'")
+
+    prepared["group"] = prepared["group"].astype(str)
+    prepared = prepared.sort_values(["group", "timestamp"]).reset_index(drop=True)
+
+    return prepared
 
 
-@cli.command()
-@click.option('--webhook-url', prompt='Slack webhook URL', help='Slack webhook URL to test')
-def test_slack(webhook_url):
-    """Test Slack webhook integration."""
-    
-    console.print("🔔 Testing Slack Integration", style="bold blue")
-    
-    try:
-        from finops_watchdog.detector import Anomaly, AnomalyType, SeverityLevel
-        from datetime import date
-        
-        # Create test anomaly
-        test_anomaly = Anomaly(
-            date=date.today(),
-            anomaly_type=AnomalyType.COST_SPIKE,
-            severity=SeverityLevel.HIGH,
-            actual_cost=150.00,
-            expected_cost=75.00,
-            deviation_percentage=100.0,
-            service="Amazon EC2",
-            description="Test anomaly for Slack integration"
-        )
-        
-        alerter = AlertManager(slack_webhook=webhook_url)
-        alerter.send_anomaly_alerts([test_anomaly], ["slack"])
-        
-        console.print("✅ Test Slack alert sent successfully!", style="green")
-        
-    except Exception as e:
-        console.print(f"❌ Slack test failed: {e}", style="red")
-        exit(1)
+def _detect_anomalies(
+    dataframe: pd.DataFrame,
+    *,
+    window_days: int,
+    threshold: float,
+    min_amount: float,
+) -> List[Dict[str, Any]]:
+    anomalies: List[Dict[str, Any]] = []
 
+    for group_value, group_frame in dataframe.groupby("group", sort=True):
+        ordered = group_frame.sort_values("timestamp").copy()
 
-def _display_detection_summary(anomalies, trends, days):
-    """Display anomaly detection summary."""
-    
-    # Summary panel
-    if anomalies:
-        severity_counts = {}
-        for anomaly in anomalies:
-            severity_counts[anomaly.severity] = severity_counts.get(anomaly.severity, 0) + 1
-        
-        summary_lines = [f"🚨 Found {len(anomalies)} anomalies in {days} days"]
-        for severity, count in severity_counts.items():
-            emoji = {"critical": "🔥", "high": "⚠️", "medium": "⚡", "low": "📊"}.get(severity.value, "📊")
-            summary_lines.append(f"{emoji} {count} {severity.value.title()}")
-    else:
-        summary_lines = [f"✅ No anomalies detected in {days} days", "All costs within normal ranges"]
-    
-    console.print(Panel("\n".join(summary_lines), title="Detection Summary", border_style="blue"))
-    
-    # Trend summary
-    trend_text = f"📈 Trend: {trends['trend_direction'].title()} ({trends['volatility_level']} volatility)"
-    if trends['data_quality'] == 'limited':
-        trend_text += "\n⚠️ Limited cost data available for analysis"
-    
-    console.print(Panel(trend_text, title="Cost Trends", border_style="green"))
+        baseline = ordered["value"].shift(1).rolling(window=window_days, min_periods=window_days).mean()
+        rolling_std = ordered["value"].shift(1).rolling(window=window_days, min_periods=window_days).std(ddof=0)
 
+        ordered["baseline"] = baseline
+        ordered["rolling_std"] = rolling_std
 
-def _display_trend_analysis(trends, daily_costs):
-    """Display detailed trend analysis."""
-    
-    # Trend table
-    trend_table = Table(title="Cost Trend Analysis")
-    trend_table.add_column("Metric", style="cyan")
-    trend_table.add_column("Value", style="white")
-    
-    trend_table.add_row("Trend Direction", trends['trend_direction'].title())
-    trend_table.add_row("Trend Magnitude", f"{trends['trend_magnitude_pct']:.1f}%")
-    trend_table.add_row("Recent Daily Average", f"${trends['recent_avg_daily']:.2f}")
-    trend_table.add_row("Previous Daily Average", f"${trends['previous_avg_daily']:.2f}")
-    trend_table.add_row("Volatility Level", trends['volatility_level'].title())
-    trend_table.add_row("Volatility Score", f"{trends['volatility']:.2f}")
-    trend_table.add_row("Days Analyzed", str(trends['total_days_analyzed']))
-    trend_table.add_row("Data Quality", trends['data_quality'].title())
-    
-    console.print(trend_table)
-    
-    # Recent costs table
-    if len(daily_costs) > 0:
-        recent_table = Table(title="Recent Daily Costs")
-        recent_table.add_column("Date", style="cyan")
-        recent_table.add_column("Cost", style="white")
-        recent_table.add_column("Change", style="yellow")
-        
-        recent_costs = daily_costs.tail(7).reset_index(drop=True)
-        for i, row in recent_costs.iterrows():
-            change = ""
-            if i > 0:
-                prev_cost = recent_costs.iloc[i-1]['total_cost']
-                if prev_cost > 0:
-                    change_pct = (row['total_cost'] - prev_cost) / prev_cost * 100
-                    change = f"{change_pct:+.1f}%"
-            
-            recent_table.add_row(str(row['date']), f"${row['total_cost']:.2f}", change)
-        
-        console.print(recent_table)
+        for _, row in ordered.iterrows():
+            baseline_value = row["baseline"]
+            current_value = row["value"]
+            std_value = row["rolling_std"]
 
+            if pd.isna(baseline_value) or baseline_value <= 0:
+                continue
 
-def _export_results(anomalies, trends, export_path):
-    """Export results to file."""
-    
-    try:
-        data = {
-            "timestamp": str(datetime.now()),
-            "anomalies": [
+            delta = current_value - baseline_value
+            if delta <= 0 or delta < min_amount:
+                continue
+
+            if pd.isna(std_value) or std_value <= 0:
+                z_score = float("inf")
+            else:
+                z_score = delta / std_value
+
+            if z_score < threshold:
+                continue
+
+            delta_pct = (delta / baseline_value) * 100.0
+
+            anomalies.append(
                 {
-                    "date": str(a.date),
-                    "type": a.anomaly_type.value,
-                    "severity": a.severity.value,
-                    "actual_cost": a.actual_cost,
-                    "expected_cost": a.expected_cost,
-                    "deviation_percentage": a.deviation_percentage,
-                    "service": a.service,
-                    "description": a.description,
-                    "confidence_score": a.confidence_score
+                    "timestamp": _to_utc_iso(row["timestamp"]),
+                    "group": group_value,
+                    "baseline": _rounded_float(baseline_value),
+                    "current": _rounded_float(current_value),
+                    "delta": _rounded_float(delta),
+                    "delta_pct": _rounded_float(delta_pct),
+                    "severity": _severity_for_score(z_score, threshold),
+                    "anomaly_type": "spend_above_threshold",
                 }
-                for a in anomalies
-            ],
-            "trends": trends
-        }
-        
-        if export_path.lower().endswith('.yaml') or export_path.lower().endswith('.yml'):
-            with open(export_path, 'w') as f:
-                yaml.dump(data, f, default_flow_style=False)
-        else:
-            with open(export_path, 'w') as f:
-                json.dump(data, f, indent=2)
-        
-        console.print(f"✅ Results exported to {export_path}", style="green")
-        
-    except Exception as e:
-        console.print(f"❌ Export failed: {e}", style="red")
+            )
+
+    anomalies.sort(key=lambda item: (item["timestamp"], item["group"]))
+    return anomalies
 
 
-if __name__ == '__main__':
+def _severity_for_score(z_score: float, threshold: float) -> str:
+    if z_score >= threshold * 2.0:
+        return "critical"
+    if z_score >= threshold * 1.5:
+        return "high"
+    return "medium"
+
+
+def _build_payload(config: DetectConfig, anomalies: List[Dict[str, Any]]) -> Dict[str, Any]:
+    groups_impacted = len({anomaly["group"] for anomaly in anomalies})
+    max_delta_pct = max((abs(anomaly["delta_pct"]) for anomaly in anomalies), default=0.0)
+
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "metadata": {
+            "generated_at": _utc_now_iso(),
+            "input_file": str(config.input_path),
+            "window": config.window,
+            "threshold": config.threshold,
+            "group_by": config.group_by,
+        },
+        "summary": {
+            "total_anomalies": len(anomalies),
+            "groups_impacted": groups_impacted,
+            "max_delta_pct": _rounded_float(max_delta_pct),
+        },
+        "anomalies": anomalies,
+    }
+
+
+def _emit_payload(payload: Dict[str, Any], output_format: str) -> None:
+    if output_format == "json":
+        click.echo(json.dumps(payload, indent=2))
+        return
+
+    if output_format == "yaml":
+        click.echo(yaml.safe_dump(payload, sort_keys=False))
+        return
+
+    if output_format == "csv":
+        click.echo(_anomalies_to_csv(payload["anomalies"]), nl=False)
+        return
+
+    raise ValueError(f"unsupported output format: {output_format}")
+
+
+def _anomalies_to_csv(anomalies: List[Dict[str, Any]]) -> str:
+    fieldnames = [
+        "timestamp",
+        "group",
+        "baseline",
+        "current",
+        "delta",
+        "delta_pct",
+        "severity",
+        "anomaly_type",
+    ]
+
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=fieldnames)
+    writer.writeheader()
+    for anomaly in anomalies:
+        writer.writerow({key: anomaly.get(key) for key in fieldnames})
+
+    return buffer.getvalue()
+
+
+def _to_utc_iso(value: Any) -> str:
+    timestamp = pd.Timestamp(value)
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.tz_localize("UTC")
+    else:
+        timestamp = timestamp.tz_convert("UTC")
+    return timestamp.to_pydatetime().replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _rounded_float(value: Any) -> float:
+    return round(float(value), 4)
+
+
+if __name__ == "__main__":
     cli()

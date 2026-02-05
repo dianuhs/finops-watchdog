@@ -1,0 +1,4 @@
+date,SERVICE,cost
+2026-01-01,AmazonEC2,100
+2026-01-02,AmazonEC2,105
+2026-01-03,AmazonEC2,98
