@@ -1,17 +1,29 @@
 # FinOps Watchdog
 
-**FinOps Watchdog v0.1 is a small CSV-in, anomalies-out CLI.**
+**Part of the Visibility → Variance → Tradeoffs pipeline.**
 
-It reads a local cost time-series CSV, detects spend spikes against a trailing baseline, and emits deterministic machine-readable output.
+| Tool | Role | Repo |
+|------|------|------|
+| FinOps Lite | Cost visibility — pull AWS spend, compare periods, export FOCUS 1.0 CSV | [dianuhs/finops-lite](https://github.com/dianuhs/finops-lite) |
+| **FinOps Watchdog** | Anomaly detection — detect spend spikes from any cost CSV | [dianuhs/finops-watchdog](https://github.com/dianuhs/finops-watchdog) |
+| Recovery Economics | Resilience modeling — model backup/restore costs and compare scenarios | [dianuhs/recovery-economics](https://github.com/dianuhs/recovery-economics) |
+| Cloud Cost Guard | Dashboard — turn cloud bills into clear actions | [dianuhs/cloud-cost-guard](https://github.com/dianuhs/cloud-cost-guard) |
 
-## What v0.1 Is
+These four tools form one production FinOps pipeline built for finance and engineering teams: pull raw cost data → detect anomalies → model resilience tradeoffs → surface everything in a decision-ready dashboard.
+
+---
+
+**FinOps Watchdog** is a CSV-in, anomalies-out CLI. It reads a cost time-series CSV, detects spend spikes against a trailing baseline, and emits deterministic machine-readable output — plus an optional human-readable markdown summary via `--report`.
+
+## What It Does
 
 - One command: `detect`
 - One job: read CSV input and return anomaly findings
 - Stable output contract: `json`, `yaml`, or `csv`
+- Optional `--report <file>` for a clean markdown anomaly summary
 - Explicit exit codes for automation
 
-## What v0.1 Is Not
+## What It Does Not Do
 
 - No cloud API collection
 - No Slack/Teams/email alerts
@@ -38,6 +50,18 @@ finops-watchdog detect \
   --output-format json
 ```
 
+Add `--report anomaly-summary.md` to also write a human-readable markdown summary alongside the machine output:
+
+```bash
+finops-watchdog detect \
+  --input cost.csv \
+  --time-column date \
+  --value-column amount \
+  --group-by SERVICE \
+  --output-format json \
+  --report anomaly-summary.md
+```
+
 ### Flags
 
 Required:
@@ -53,6 +77,7 @@ Optional:
 - `--window` lookback window in days (`30d` default)
 - `--threshold` anomaly threshold in standard deviations above baseline (`3.0` default)
 - `--min-amount` ignore anomalies below this absolute delta (`0.0` default)
+- `--report` path to write a human-readable markdown anomaly summary
 
 ## JSON Output Contract (v1.0)
 
@@ -92,6 +117,7 @@ Notes:
 - `delta_pct` is signed.
 - Output is always emitted, including zero-anomaly runs (`total_anomalies: 0`, `anomalies: []`).
 - In machine-readable modes (`json`, `yaml`, `csv`), stdout contains only the payload.
+- `--report` writes markdown to a file without polluting stdout.
 
 ## Exit Codes
 
@@ -107,9 +133,14 @@ Notes:
 pytest -q tests/
 ```
 
-## Out of Scope for v0.1
+## Pipeline
 
-Out of scope for v0.1: cloud API collection, Slack/Teams/email alerts, schedulers/cron daemons, dashboards/UI, and auto-remediation. v0.1 only reads a local CSV and emits deterministic anomalies in JSON/CSV/YAML.
+FinOps Watchdog is step two. Typical flow:
+
+1. **[FinOps Lite](https://github.com/dianuhs/finops-lite)** exports a FOCUS 1.0 CSV from AWS Cost Explorer
+2. **FinOps Watchdog** detects anomalies in that CSV
+3. **[Recovery Economics](https://github.com/dianuhs/recovery-economics)** models the cost impact of resilience decisions
+4. **[Cloud Cost Guard](https://github.com/dianuhs/cloud-cost-guard)** surfaces all of this in a dashboard
 
 ## License
 
